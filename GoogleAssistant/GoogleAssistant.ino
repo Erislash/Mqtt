@@ -1,22 +1,26 @@
+//LIBRERIAS A USAR
 #include <ESP8266WiFi.h>
 #include <PubSubClient.h>
 #include <ArduinoJson.h>
 
+//CONFIGURACIÓNES INICIALES
 #define led  2
-#define ssid  "RCA"
+#define ssid  "RED"
 #define wifiPass "12345678"
 #define mqttServer "mqtt.beebotte.com"
 #define mqttPort 1883
-#define mqttUser "token_YcwMRaLbK8Us4SCb"
-#define subTopic "Ifttt/ghome"
-
+#define mqttUser "token_YcwMxxxxxxxxxxxxxx"   //TOKEN QUE NOS PROVEE BEEBOTTE
+#define subTopic "Ifttt/ghome"                //DIRECCIÓN QUE ASIGNAMOS ANTERIORMENTE
 
 WiFiClient espClient;
 PubSubClient client(espClient);
 
+long lastAttempt = 0;
+
 void setup(){
   Serial.begin(115200);
   pinMode(led, OUTPUT);
+
 
   ConnectWifi(ssid, wifiPass);
 
@@ -27,7 +31,7 @@ void setup(){
   
   while(!client.connected()){
     Serial.println(".");
-    
+
     if(client.connect("NodeLuz", mqttUser, "")){
       Serial.println("Conectado");
       
@@ -46,10 +50,22 @@ void setup(){
 
 
 void loop(){
-  client.loop();
+//RECONEXIÓN AL SERVIDOR
+  if (!client.connected()) {
+    long now = millis();
+    if (now - lastAttempt > 5000) {
+      lastReconnectAttempt = now;
+      if (reconnect()) {
+        lastAttempt = 0;
+      }
+    }
+  } else {
+    client.loop();
+  }
 }
 
 
+//FUNCIÓN PARA CONECTARSE A UNA RED WIFI
 void ConnectWifi(String p_ssid, String p_password){
   WiFi.mode(WIFI_OFF);
   delay(1000);
@@ -68,6 +84,8 @@ void ConnectWifi(String p_ssid, String p_password){
 }
 
 
+/*CALLBACK, SE EJECUTARÁ AL RECIBIR UN MENSAJE DEL TEMA 
+AL QUE NOS SUSCRIBIMOS*/
 void CallMQTT(char* topic, byte* payload, unsigned int length) {
   String message = "";
  
@@ -79,13 +97,11 @@ void CallMQTT(char* topic, byte* payload, unsigned int length) {
     message += (char)payload[i];
   }
   Serial.println(message);
-  
+
+/*DESERIALIZACIÓN DEL JSON QUE NOS LLEGA A TRAVÉS DEL BROKER, 
+ENVIADO POR EL WEBHOOK*/
   StaticJsonDocument<256> doc;
 
-
-  //char* action = new char;
-  //message.toCharArray(action, message.length() + 1);
-   
   DeserializationError error = deserializeJson(doc, message);
 
   if(error) {
@@ -94,15 +110,21 @@ void CallMQTT(char* topic, byte* payload, unsigned int length) {
     return;
   }
 
+//EXTRAEMOS EL DATO GUARDADO EN LA KEY "data"
   boolean action = doc["data"];
-  Serial.println(action);
-  //delete[] action;
   Serial.println();
   Serial.println("/////////////////////////////////////////////////////////////////");
 
-
-  if(action)
+/*SI EL MENSAJE QUE RECIBIMOS ES "true" ENCENDEMOS EL LED
+E INFORMAMOS QUE SE ENCENDIO A TRAVÉS DE OTRA DIRECCIÓN
+A LA QUE SE SUSCRIBIRÁ LA APLICACIÓN IoT "MQTT Panel"*/ 
+  if(action){
     digitalWrite(led, LOW);
-  else if(!action)
+    client.publish("Ifttt/nodeStatus", "{\"data\":true}");
+  }
+//DE RECIBIR UN "false", SE APAGARÁ E INFORMARÁ  
+  else if(!action){
     digitalWrite(led, HIGH);
+    client.publish("Ifttt/nodeStatus", "{\"data\":false}");
+  }
 }
